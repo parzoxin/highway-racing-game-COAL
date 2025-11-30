@@ -1,3 +1,5 @@
+;almost perfect
+;Enhanced Racing Game with improved graphics and smooth scrolling
 [org 0x0100]
 
 jmp start
@@ -8,31 +10,491 @@ oldtimer: dd 0
 tickcount: dw 0
 gameover: db 0
 score: dw 0
-carx: dw 151
+carx: dw 149
 cary: dw 175
 carlane: db 1
-lanepositions: dw 79, 151, 223
+lanepositions: dw 77, 149, 221
+carpositions: dw 77, 149, 221
 
-; Landscape scroll offset
 scrolloffset: dw 0
-
-; Enemy cars structure: 4 bytes each [lane, ypos_low, ypos_high, active]
 numcars: db 0
-enemycars: times 20 db 0  ; 5 cars * 4 bytes each
+enemycars: times 20 db 0
 spawndelay: dw 0
-
-; Bonus objects
 bonusactive: db 0
 bonuslane: db 0
 bonusy: dw 0
-
 rand_seed: dw 0
 
+; ============ NEW FEATURES DATA ============
+game_state: db 0  ; 0=intro, 1=playing, 2=paused, 3=gameover
+pause_flag: db 0  ; Flag to indicate ESC was pressed
+
+; Text strings
+title_str: db 'RACING GAME', 0
+names_str: db 'Abdul Ahad Khan & Ahmad Babar', 0
+roll_str: db '24L-0954 & 24L-0644', 0
+semester_str: db 'Fall 2025', 0
+press_key_str: db 'Press any key to start...', 0
+pause_confirm_str: db 'Exit game? (Y/N)', 0
+game_over_str: db 'GAME OVER', 0
+final_score_str: db 'Final Score: ', 0
+replay_str: db 'Press R to Replay or E to Exit', 0
+controls_str: db 'Controls: Arrow Keys to Move, ESC to Pause', 0
+
 ; ============ CONFIGURABLE SETTINGS ============
-enemy_speed: dw 3
+enemy_speed: dw 5 ; Reduced for smoother movement
 bonus_speed: dw 2
-enemy_spawn_delay: dw 20
+enemy_spawn_delay: dw 40
 bonus_spawn_chance: dw 5
+
+; ============ TEXT MODE FUNCTIONS ============
+set_text_mode:
+    mov ax, 0x0003
+    int 0x10
+    ret
+
+set_graphics_mode:
+    mov ax, 0x0013
+    int 0x10
+    ret
+
+clear_screen_text:
+    push ax
+    push cx
+    push di
+    push es
+    mov ax, 0xB800
+    mov es, ax
+    mov di, 0
+    mov cx, 2000
+    mov ax, 0x0720
+    rep stosw
+    pop es
+    pop di
+    pop cx
+    pop ax
+    ret
+
+print_string_colored: ; si=string, di=screen_position, ah=color
+    push ax
+    push si
+    push di
+.loop:
+    mov al, [si]
+    cmp al, 0
+    je .done
+    mov [es:di], ax
+    inc si
+    add di, 2
+    jmp .loop
+.done:
+    pop di
+    pop si
+    pop ax
+    ret
+
+draw_box:  ; Draw a decorative box around text
+    push ax
+    push bx
+    push cx
+    push di
+    
+    ; Top border
+    mov di, 160*6 + 20*2
+    mov cx, 40
+    mov ax, 0x0FCD  ; White horizontal line
+.top:
+    mov [es:di], ax
+    add di, 2
+    loop .top
+    
+    ; Bottom border
+    mov di, 160*16 + 20*2
+    mov cx, 40
+.bottom:
+    mov [es:di], ax
+    add di, 2
+    loop .bottom
+    
+    ; Side borders
+    mov bx, 7
+.sides:
+    mov di, bx
+    shl di, 7
+    add di, bx
+    add di, bx
+    shl di, 1
+    add di, 20*2
+    mov ax, 0x0FBA  ; White vertical line
+    mov [es:di], ax
+    add di, 80
+    mov [es:di], ax
+    inc bx
+    cmp bx, 16
+    jl .sides
+    
+    pop di
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; ============ INTRODUCTION SCREEN ============
+show_intro_screen:
+    call set_text_mode
+    call clear_screen_text
+    
+    mov ax, 0xB800
+    mov es, ax
+    
+    ; Draw decorative box
+    call draw_box
+    
+    ; Game title (bright cyan)
+    mov si, title_str
+    mov di, 160*8 + 34*2
+    mov ah, 0x0B
+    call print_string_colored
+    
+    ; Names (yellow)
+    mov si, names_str
+    mov di, 160*10 + 25*2
+    mov ah, 0x0E
+    call print_string_colored
+    
+    ; Roll numbers (light green)
+    mov si, roll_str
+    mov di, 160*11 + 29*2
+    mov ah, 0x0A
+    call print_string_colored
+    
+    ; Semester (light blue)
+    mov si, semester_str
+    mov di, 160*13 + 35*2
+    mov ah, 0x09
+    call print_string_colored
+    
+    ; Controls (white)
+    mov si, controls_str
+    mov di, 160*20 + 19*2
+    mov ah, 0x0F
+    call print_string_colored
+    
+    ; Press any key (blinking white)
+    mov si, press_key_str
+    mov di, 160*22 + 27*2
+    mov ah, 0x8F
+    call print_string_colored
+    
+    ; Wait for key press
+    mov ah, 0
+    int 0x16
+    
+    ret
+
+; ============ SIMPLE PAUSE CONFIRMATION ============
+show_pause_confirm:
+    push ax
+    push es
+    xor ax, ax
+    mov es, ax
+    
+    cli
+    mov ax, [oldkb]
+    mov [es:9*4], ax
+    mov ax, [oldkb+2]
+    mov [es:9*4+2], ax
+    sti
+    
+    pop es
+    pop ax
+    
+    call set_text_mode
+    call clear_screen_text
+    
+    mov ax, 0xB800
+    mov es, ax
+    
+    ; Display confirmation prompt (bright white)
+    mov si, pause_confirm_str
+    mov di, 160*12 + 32
+    mov ah, 0x0F
+    call print_string_colored
+    
+.wait_input:
+    mov ah, 0
+    int 0x16
+    
+    cmp al, 'Y'
+    je .exit_game
+    cmp al, 'y'
+    je .exit_game
+    cmp al, 'N'
+    je .resume_game
+    cmp al, 'n'
+    je .resume_game
+    
+    jmp .wait_input
+
+.exit_game:
+    mov byte [gameover], 1
+    mov byte [game_state], 3
+    ret
+
+.resume_game:
+    push ax
+    push es
+    xor ax, ax
+    mov es, ax
+    
+    cli
+    mov word [es:9*4], kbisr
+    mov [es:9*4+2], cs
+    sti
+    
+    pop es
+    pop ax
+    
+    call set_graphics_mode
+    mov byte [game_state], 1
+    ret
+
+; ============ GAME OVER SCREEN ============
+show_game_over_screen:
+    push ax
+    push es
+    xor ax, ax
+    mov es, ax
+    
+    cli
+    mov ax, [oldkb]
+    mov [es:9*4], ax
+    mov ax, [oldkb+2]
+    mov [es:9*4+2], ax
+    
+    mov ax, [oldtimer]
+    mov [es:8*4], ax
+    mov ax, [oldtimer+2]
+    mov [es:8*4+2], ax
+    sti
+    
+    pop es
+    pop ax
+    
+    mov cx, 0xFFFF
+.delay:
+    loop .delay
+    
+    call set_text_mode
+    call clear_screen_text
+    
+    mov ax, 0xB800
+    mov es, ax
+    
+    ; Draw box
+    call draw_box
+    
+    ; Game over text (bright red)
+    mov si, game_over_str
+    mov di, 160*9 + 35*2
+    mov ah, 0x0C
+    call print_string_colored
+    
+    ; Final score text (bright yellow)
+    mov si, final_score_str
+    mov di, 160*12 + 33*2
+    mov ah, 0x0E
+    call print_string_colored
+    
+    ; Display score (bright cyan)
+    mov ax, [score]
+    mov di, 160*12 + 47*2
+    mov bl, 0x0B
+    call display_number
+    
+    ; Replay or exit instruction (bright white)
+    mov si, replay_str
+    mov di, 160*15 + 24*2
+    mov ah, 0x0F
+    call print_string_colored
+    
+.clear_buffer:
+    mov ah, 1
+    int 0x16
+    jz .buffer_empty
+    mov ah, 0
+    int 0x16
+    jmp .clear_buffer
+    
+.buffer_empty:
+.wait_choice:
+    mov ah, 0
+    int 0x16
+    
+    cmp al, 'R'
+    je .replay_game
+    cmp al, 'r'
+    je .replay_game
+    cmp al, 'E'
+    je .exit_game
+    cmp al, 'e'
+    je .exit_game
+    
+    jmp .wait_choice
+
+.replay_game:
+    mov byte [game_state], 0
+    ret
+
+.exit_game:
+    mov byte [game_state], 3
+	jmp clear_screen_text
+    ret
+
+display_number: ; ax=number, di=screen_position, bl=color
+    push ax
+    push bx
+    push cx
+    push dx
+    push di
+    
+    mov bh, bl  ; Save color
+    mov bx, 10
+    mov cx, 0
+    
+.convert_loop:
+    xor dx, dx
+    div bx
+    add dl, '0'
+    push dx
+    inc cx
+    test ax, ax
+    jnz .convert_loop
+    
+.display_loop:
+    pop ax
+    mov ah, bh  ; Restore color
+    mov [es:di], ax
+    add di, 2
+    loop .display_loop
+    
+    pop di
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; ============ SIMPLIFIED KEYBOARD ISR ============
+kbisr:
+    push ax
+    push ds
+    
+    push cs
+    pop ds
+    
+    in al, 0x60
+    
+    cmp al, 0x01
+    jne .not_esc
+    
+    test al, 0x80
+    jnz .not_esc
+    
+    mov byte [pause_flag], 1
+    jmp .done
+    
+.not_esc:
+    cmp byte [game_state], 1
+    jne .done
+    
+    test al, 0x80
+    jnz .done
+    
+    cmp al, 0x4B
+    je .leftpressed
+    
+    cmp al, 0x4D
+    je .rightpressed
+    
+    jmp .done
+
+.leftpressed:
+    cmp byte [carlane], 0
+    je .done
+    dec byte [carlane]
+    movzx bx, byte [carlane]
+    shl bx, 1
+    mov ax, [lanepositions+bx]
+    mov [carx], ax
+    jmp .done
+    
+.rightpressed:
+    cmp byte [carlane], 2
+    je .done
+    inc byte [carlane]
+    movzx bx, byte [carlane]
+    shl bx, 1
+    mov ax, [lanepositions+bx]
+    mov [carx], ax
+
+.done:
+    mov al, 0x20
+    out 0x20, al
+    
+    pop ds
+    pop ax
+    iret
+
+; ============ TIMER ISR ============
+timer:
+    push ax
+    push ds
+    
+    push cs
+    pop ds
+    
+    cmp byte [game_state], 1
+    jne .done
+    
+    inc word [tickcount]
+    cmp word [tickcount], 2
+    jl .timerdone
+    
+    mov word [tickcount], 0
+    
+    cmp byte [gameover], 1
+    je .game_over
+    
+    add word [scrolloffset], 2
+    
+    call redraw_screen
+    call draw_lanes
+    call draw_trees
+    call spawn_enemy
+    call spawn_bonus
+    call update_enemies
+    call update_bonus
+    call draw_enemies
+    call draw_bonus
+    call DrawCar
+    call check_collision
+    call show_score
+    
+    inc word [score]
+    jmp .timerdone
+
+.game_over:
+    mov byte [game_state], 3
+
+.timerdone:
+    mov al, 0x20
+    out 0x20, al
+
+.done:
+    pop ds
+    pop ax
+    iret
 
 ; ============ RANDOM NUMBER GENERATOR ============
 get_random:
@@ -49,7 +511,116 @@ get_random:
     pop bx
     ret
 
-; ============ CLEAR AND DRAW FULL SCREEN ============
+; ============ RESET GAME STATE ============
+reset_game_state:
+    push ax
+    push bx
+    push cx
+    push si
+    
+    mov word [tickcount], 0
+    mov byte [gameover], 0
+    mov word [score], 0
+    mov word [carx], 149
+    mov word [cary], 175
+    mov byte [carlane], 1
+    
+    mov word [scrolloffset], 0
+    mov byte [numcars], 0
+    mov word [spawndelay], 0
+    mov byte [bonusactive], 0
+    mov byte [bonuslane], 0
+    mov word [bonusy], 0
+    mov byte [pause_flag], 0
+    
+    mov si, enemycars
+    mov cx, 20
+    xor al, al
+.clear_enemies:
+    mov [si], al
+    inc si
+    loop .clear_enemies
+    
+    pop si
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; ============ MAIN PROGRAM ============
+start:
+game_restart:
+    call reset_game_state
+    call show_intro_screen
+    
+    xor ax, ax
+    int 0x1A
+    mov [rand_seed], dx
+    
+    call set_graphics_mode
+    
+    xor ax, ax
+    mov es, ax
+    
+    mov ax, [es:9*4]
+    mov [oldkb], ax
+    mov ax, [es:9*4+2]
+    mov [oldkb+2], ax
+    
+    mov ax, [es:8*4]
+    mov [oldtimer], ax
+    mov ax, [es:8*4+2]
+    mov [oldtimer+2], ax
+    
+    cli
+    mov word [es:9*4], kbisr
+    mov [es:9*4+2], cs
+    mov word [es:8*4], timer
+    mov [es:8*4+2], cs
+    sti
+    
+    mov byte [game_state], 1
+
+gameloop:
+    cmp byte [game_state], 3
+    je endgame
+    
+    cmp byte [pause_flag], 1
+    je handle_pause
+    
+    hlt
+    jmp gameloop
+
+handle_pause:
+    mov byte [pause_flag], 0
+    call show_pause_confirm
+    jmp gameloop
+    
+endgame:
+    call show_game_over_screen
+    
+    cmp byte [game_state], 0
+    je game_restart
+    
+    xor ax, ax
+    mov es, ax
+    
+    cli
+    mov ax, [oldkb]
+    mov [es:9*4], ax
+    mov ax, [oldkb+2]
+    mov [es:9*4+2], ax
+    
+    mov ax, [oldtimer]
+    mov [es:8*4], ax
+    mov ax, [oldtimer+2]
+    mov [es:8*4+2], ax
+    sti
+    
+    mov ax, 0x4c00
+    int 0x21
+
+; ============ REDRAW SCREEN WITH DOUBLE BUFFERING CONCEPT ============
 redraw_screen:
     push ax
     push bx
@@ -61,10 +632,9 @@ redraw_screen:
     mov ax, 0xA000
     mov es, ax
     
-    ; Draw entire screen fresh each frame
+    ; Draw entire screen
     mov dx, 0
-row_loop:
-    ; Left green belt (0-49)
+.row_loop:
     mov cx, 0
     mov di, cx
     push dx
@@ -73,35 +643,37 @@ row_loop:
     mul bx
     pop dx
     add di, ax
+    
+    ; Left green belt (0-49)
     mov al, 2
     mov bx, 50
-fill_left:
+.fill_left:
     mov [es:di], al
     inc di
     dec bx
-    jnz fill_left
+    jnz .fill_left
     
     ; Road (50-269)
     mov al, 8
     mov bx, 220
-fill_road:
+.fill_road:
     mov [es:di], al
     inc di
     dec bx
-    jnz fill_road
+    jnz .fill_road
     
     ; Right green belt (270-319)
     mov al, 2
     mov bx, 50
-fill_right:
+.fill_right:
     mov [es:di], al
     inc di
     dec bx
-    jnz fill_right
+    jnz .fill_right
     
     inc dx
     cmp dx, 200
-    jb row_loop
+    jb .row_loop
     
     pop es
     pop di
@@ -111,7 +683,7 @@ fill_right:
     pop ax
     ret
 
-; ============ DRAW LANE DIVIDERS ============
+; ============ DRAW SMOOTH LANE DIVIDERS ============
 draw_lanes:
     push ax
     push bx
@@ -124,15 +696,16 @@ draw_lanes:
     mov es, ax
     
     mov si, [scrolloffset]
-    
+    neg si
+
     ; Lane divider 1 (x=123)
     mov dx, 0
-lane1_loop:
+.lane1_loop:
     mov ax, dx
     add ax, si
     and ax, 31
     cmp ax, 15
-    jg lane1_skip
+    jg .lane1_skip
     
     push dx
     mov ax, dx
@@ -142,21 +715,23 @@ lane1_loop:
     mov di, ax
     mov al, 15
     mov [es:di], al
+    inc di
+    mov [es:di], al  ; Make lines thicker
     pop dx
     
-lane1_skip:
+.lane1_skip:
     inc dx
     cmp dx, 200
-    jb lane1_loop
+    jb .lane1_loop
     
     ; Lane divider 2 (x=195)
     mov dx, 0
-lane2_loop:
+.lane2_loop:
     mov ax, dx
     add ax, si
     and ax, 31
     cmp ax, 15
-    jg lane2_skip
+    jg .lane2_skip
     
     push dx
     mov ax, dx
@@ -166,12 +741,14 @@ lane2_loop:
     mov di, ax
     mov al, 15
     mov [es:di], al
+    inc di
+    mov [es:di], al  ; Make lines thicker
     pop dx
     
-lane2_skip:
+.lane2_skip:
     inc dx
     cmp dx, 200
-    jb lane2_loop
+    jb .lane2_loop
     
     pop es
     pop di
@@ -181,7 +758,7 @@ lane2_skip:
     pop ax
     ret
 
-; ============ DRAW TREES ON SIDES ============
+; ============ DRAW ENHANCED TREES AND FOLIAGE ============
 draw_trees:
     push ax
     push bx
@@ -189,222 +766,289 @@ draw_trees:
     push dx
     push di
     push es
+    push bp
     
     mov ax, 0xA000
     mov es, ax
     
     mov si, [scrolloffset]
+    neg si
     
-    ; Left side trees - more detailed
-    mov bx, 0
-left_tree_loop:
-    mov ax, bx
+    ; Left side - trees and bushes
+    mov bp, 0  ; Y position counter
+.left_side_loop:
+    mov ax, bp
     add ax, si
     xor dx, dx
-    mov cx, 80
+    mov cx, 50  ; Tree spacing
     div cx
     
-    cmp dx, 60
-    jge skip_left_tree
+    ; Check if we should draw a tree
+    cmp dx, 35
+    jge near .try_left_bush
     
-    ; Draw tree trunk at x=25 (brown)
+    ; Calculate base Y position for this tree
+    mov bx, bp
+    
+    ; Draw complete tree (crown then trunk)
+    ; Tree crown first (top part)
+    mov ax, bx
+    cmp ax, 15
+    jl near .try_left_bush  ; Don't draw if too close to top
+    
+    ; Crown layer 1 (topmost, smallest)
+    sub ax, 15
     push bx
-    mov ax, bx
-    mov cx, 320
-    mul cx
-    add ax, 25
+    mov bx, 320
+    mul bx
+    add ax, 18
     mov di, ax
-    mov al, 6
-    mov cx, 5
-trunk_left:
+    mov al, 2  ; Dark green
+    mov cx, 14
+.left_crown1:
     mov [es:di], al
     inc di
-    loop trunk_left
-    
-    ; Draw tree top (green) - pyramid shape
-    mov ax, bx
-    sub ax, 12
-    cmp ax, 0
-    jl no_tree_top
-    mov cx, 320
-    mul cx
-    add ax, 20
-    mov di, ax
-    
-    ; Tree top layers
-    mov al, 10
-    mov cx, 3
-tree_layer_loop:
-    push cx
-    push di
-    mov cx, 15
-tree_top_row:
-    mov [es:di], al
-    inc di
-    loop tree_top_row
-    pop di
-    add di, 320
-    inc di
-    pop cx
-    loop tree_layer_loop
-    
-no_tree_top:
+    loop .left_crown1
     pop bx
     
-skip_left_tree:
-    inc bx
-    cmp bx, 200
-    jb left_tree_loop
-    
-    ; Right side trees
-    mov bx, 0
-right_tree_loop:
-    mov ax, bx
-    add ax, si
-    add ax, 40
-    xor dx, dx
-    mov cx, 80
-    div cx
-    
-    cmp dx, 60
-    jge skip_right_tree
-    
-    ; Draw tree trunk at x=290 (brown)
-    push bx
-    mov ax, bx
-    mov cx, 320
-    mul cx
-    add ax, 290
-    mov di, ax
-    mov al, 6
-    mov cx, 5
-trunk_right:
-    mov [es:di], al
-    inc di
-    loop trunk_right
-    
-    ; Draw tree top (green) - pyramid shape
+    ; Crown layer 2
     mov ax, bx
     sub ax, 12
     cmp ax, 0
-    jl no_tree_top_right
-    mov cx, 320
-    mul cx
+    jl near .try_left_bush
+    push bx
+    mov bx, 320
+    mul bx
+    add ax, 16
+    mov di, ax
+    mov al, 10  ; Bright green
+    mov cx, 18
+.left_crown2:
+    mov [es:di], al
+    inc di
+    loop .left_crown2
+    pop bx
+    
+    ; Crown layer 3
+    mov ax, bx
+    sub ax, 9
+    cmp ax, 0
+    jl near .try_left_bush
+    push bx
+    mov bx, 320
+    mul bx
+    add ax, 15
+    mov di, ax
+    mov al, 2  ; Dark green
+    mov cx, 20
+.left_crown3:
+    mov [es:di], al
+    inc di
+    loop .left_crown3
+    pop bx
+    
+    ; Tree trunk
+    mov cx, 8  ; Trunk height
+.left_trunk_loop:
+    mov ax, bx
+    cmp ax, 200
+    jge near .try_left_bush
+    push bx
+    push cx
+    mov bx, 320
+    mul bx
+    add ax, 22
+    mov di, ax
+    mov al, 6  ; Brown
+    mov cx, 6  ; Trunk width
+.left_trunk_row:
+    mov [es:di], al
+    inc di
+    loop .left_trunk_row
+    pop cx
+    pop bx
+    inc bx
+    loop .left_trunk_loop
+    jmp near .next_left_pos
+    
+.try_left_bush:
+    ; Try to draw a bush
+    mov ax, bp
+    add ax, si
+    add ax, 25  ; Offset from trees
+    xor dx, dx
+    mov cx, 40
+    div cx
+    
+    cmp dx, 25
+    jge near .next_left_pos
+    
+    ; Draw small bush
+    mov bx, bp
+    mov cx, 6  ; Bush height
+.left_bush_loop:
+    mov ax, bx
+    cmp ax, 200
+    jge near .next_left_pos
+    push bx
+    push cx
+    mov bx, 320
+    mul bx
+    add ax, 8
+    mov di, ax
+    mov al, 10  ; Bright green
+    mov cx, 12  ; Bush width
+.left_bush_row:
+    mov [es:di], al
+    inc di
+    loop .left_bush_row
+    pop cx
+    pop bx
+    inc bx
+    loop .left_bush_loop
+    
+.next_left_pos:
+    inc bp
+    cmp bp, 200
+    jb near .left_side_loop
+    
+    ; Right side - trees and bushes
+    mov bp, 0
+.right_side_loop:
+    mov ax, bp
+    add ax, si
+    add ax, 25  ; Different offset for variety
+    xor dx, dx
+    mov cx, 50
+    div cx
+    
+    ; Check if we should draw a tree
+    cmp dx, 35
+    jge near .try_right_bush
+    
+    mov bx, bp
+    
+    ; Draw complete tree
+    ; Crown layer 1
+    mov ax, bx
+    cmp ax, 15
+    jl near .try_right_bush
+    
+    sub ax, 15
+    push bx
+    mov bx, 320
+    mul bx
+    add ax, 288
+    mov di, ax
+    mov al, 2
+    mov cx, 14
+.right_crown1:
+    mov [es:di], al
+    inc di
+    loop .right_crown1
+    pop bx
+    
+    ; Crown layer 2
+    mov ax, bx
+    sub ax, 12
+    cmp ax, 0
+    jl near .try_right_bush
+    push bx
+    mov bx, 320
+    mul bx
+    add ax, 286
+    mov di, ax
+    mov al, 10
+    mov cx, 18
+.right_crown2:
+    mov [es:di], al
+    inc di
+    loop .right_crown2
+    pop bx
+    
+    ; Crown layer 3
+    mov ax, bx
+    sub ax, 9
+    cmp ax, 0
+    jl near .try_right_bush
+    push bx
+    mov bx, 320
+    mul bx
     add ax, 285
     mov di, ax
-    
-    ; Tree top layers
-    mov al, 10
-    mov cx, 3
-tree_layer_loop_right:
-    push cx
-    push di
-    mov cx, 15
-tree_top_row_right:
+    mov al, 2
+    mov cx, 20
+.right_crown3:
     mov [es:di], al
     inc di
-    loop tree_top_row_right
-    pop di
-    add di, 320
-    inc di
-    pop cx
-    loop tree_layer_loop_right
-    
-no_tree_top_right:
+    loop .right_crown3
     pop bx
     
-skip_right_tree:
-    inc bx
-    cmp bx, 200
-    jb right_tree_loop
-    
-    ; Left bushes - more varied
-    mov bx, 0
-left_bush_loop:
+    ; Trunk
+    mov cx, 8
+.right_trunk_loop:
     mov ax, bx
+    cmp ax, 200
+    jge near .try_right_bush
+    push bx
+    push cx
+    mov bx, 320
+    mul bx
+    add ax, 292
+    mov di, ax
+    mov al, 6
+    mov cx, 6
+.right_trunk_row:
+    mov [es:di], al
+    inc di
+    loop .right_trunk_row
+    pop cx
+    pop bx
+    inc bx
+    loop .right_trunk_loop
+    jmp near .next_right_pos
+    
+.try_right_bush:
+    ; Try to draw a bush
+    mov ax, bp
     add ax, si
     xor dx, dx
     mov cx, 40
     div cx
     
-    cmp dx, 15
-    jge skip_left_bush
+    cmp dx, 25
+    jge near .next_right_pos
     
-    push bx
+    ; Draw small bush
+    mov bx, bp
+    mov cx, 6
+.right_bush_loop:
     mov ax, bx
-    mov cx, 320
-    mul cx
-    add ax, 5
+    cmp ax, 200
+    jge near .next_right_pos
+    push bx
+    push cx
+    mov bx, 320
+    mul bx
+    add ax, 300
     mov di, ax
     mov al, 10
-    
-    ; Draw bush with some variation
-    mov cx, 3
-bush_layer_left:
-    push cx
-    push di
-    mov cx, 20
-bush_left:
+    mov cx, 12
+.right_bush_row:
     mov [es:di], al
     inc di
-    loop bush_left
-    pop di
-    add di, 320
-    sub di, 2
+    loop .right_bush_row
     pop cx
-    loop bush_layer_left
-    
     pop bx
-    
-skip_left_bush:
     inc bx
-    cmp bx, 200
-    jb left_bush_loop
+    loop .right_bush_loop
     
-    ; Right bushes - more varied
-    mov bx, 0
-right_bush_loop:
-    mov ax, bx
-    add ax, si
-    add ax, 20
-    xor dx, dx
-    mov cx, 40
-    div cx
+.next_right_pos:
+    inc bp
+    cmp bp, 200
+    jb near .right_side_loop
     
-    cmp dx, 15
-    jge skip_right_bush
-    
-    push bx
-    mov ax, bx
-    mov cx, 320
-    mul cx
-    add ax, 295
-    mov di, ax
-    mov al, 10
-    
-    ; Draw bush with some variation
-    mov cx, 3
-bush_layer_right:
-    push cx
-    push di
-    mov cx, 20
-bush_right:
-    mov [es:di], al
-    inc di
-    loop bush_right
-    pop di
-    add di, 320
-    sub di, 2
-    pop cx
-    loop bush_layer_right
-    
-    pop bx
-    
-skip_right_bush:
-    inc bx
-    cmp bx, 200
-    jb right_bush_loop
-    
+    pop bp
     pop es
     pop di
     pop dx
@@ -425,11 +1069,11 @@ DrawCar:
     mov ax, 0xA000
     mov es, ax
     
-    ; Main body (16x21) - RED
+    ; Main body (20x25) - RED
     mov dx, [cary]
     mov bx, dx
-    add bx, 21
-car_body_y:
+    add bx, 25
+.car_body_y:
     mov cx, [carx]
     push cx
     push dx
@@ -444,117 +1088,121 @@ car_body_y:
     pop cx
     
     push bx
-    mov bx, 16
-car_body_x:
+    mov bx, 20
+.car_body_x:
     mov byte [es:di], 4
     inc di
     dec bx
-    jnz car_body_x
+    jnz .car_body_x
     pop bx
     
     inc dx
     cmp dx, bx
-    jb car_body_y
+    jb .car_body_y
     
-    ; Wheels
+    ; Wheels (black)
     mov dx, [cary]
     add dx, 3
-    mov bx, 7
-lw1_loop:
+    mov bx, 8
+.lw1_loop:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, [carx]
-    sub cx, 2
+    sub cx, 3
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz lw1_loop
+    jnz .lw1_loop
     
     mov dx, [cary]
     add dx, 3
-    mov bx, 7
-rw1_loop:
+    mov bx, 8
+.rw1_loop:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, [carx]
-    add cx, 16
+    add cx, 20
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz rw1_loop
+    jnz .rw1_loop
     
     mov dx, [cary]
-    add dx, 14
-    mov bx, 7
-lw2_loop:
+    add dx, 17
+    mov bx, 8
+.lw2_loop:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, [carx]
-    sub cx, 2
+    sub cx, 3
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz lw2_loop
+    jnz .lw2_loop
     
     mov dx, [cary]
-    add dx, 14
-    mov bx, 7
-rw2_loop:
+    add dx, 17
+    mov bx, 8
+.rw2_loop:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, [carx]
-    add cx, 16
+    add cx, 20
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz rw2_loop
+    jnz .rw2_loop
     
     ; Window - CYAN
     mov dx, [cary]
-    add dx, 7
-    mov bx, 6
-win_loop:
+    add dx, 8
+    mov bx, 9
+.win_loop:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, [carx]
-    add cx, 4
+    add cx, 5
     add ax, cx
     mov di, ax
-    mov cx, 8
-win_x:
+    mov cx, 10
+.win_x:
     mov byte [es:di], 11
     inc di
-    loop win_x
+    loop .win_x
     pop dx
     inc dx
     dec bx
-    jnz win_loop
+    jnz .win_loop
     
     pop es
     pop di
@@ -564,9 +1212,8 @@ win_x:
     pop ax
     ret
 
-; ============ DRAW ENEMY CAR (BLUE or YELLOW) ============
+; ============ DRAW ENEMY CAR ============
 draw_enemy_car:
-    ; Input: AX=x, DX=y, BL=color (1=blue, 14=yellow)
     push ax
     push bx
     push cx
@@ -579,15 +1226,14 @@ draw_enemy_car:
     mov ax, 0xA000
     mov es, ax
     
-    ; Get the color from BL and store it
     mov al, bl
     push ax
     
     push dx
     mov bx, dx
-    add bx, 21
+    add bx, 25
     
-enemy_body_y:
+.enemy_body_y:
     mov cx, si
     push cx
     push dx
@@ -602,101 +1248,105 @@ enemy_body_y:
     pop cx
     
     push bx
-    mov bx, 16
-    mov al, [esp+4]  ; Get color from stack
-enemy_body_x:
+    mov bx, 20
+    mov al, [esp+4]
+.enemy_body_x:
     mov [es:di], al
     inc di
     dec bx
-    jnz enemy_body_x
+    jnz .enemy_body_x
     pop bx
     
     inc dx
     cmp dx, bx
-    jb enemy_body_y
+    jb .enemy_body_y
     
     pop dx
-    pop ax  ; Remove color from stack
+    pop ax
     
     ; Wheels
     push dx
     add dx, 3
-    mov bx, 7
-elw1:
+    mov bx, 8
+.elw1:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, si
-    sub cx, 2
+    sub cx, 3
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz elw1
+    jnz .elw1
     pop dx
     
     push dx
     add dx, 3
-    mov bx, 7
-erw1:
+    mov bx, 8
+.erw1:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, si
-    add cx, 16
+    add cx, 20
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz erw1
+    jnz .erw1
     pop dx
     
     push dx
-    add dx, 14
-    mov bx, 7
-elw2:
+    add dx, 17
+    mov bx, 8
+.elw2:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, si
-    sub cx, 2
+    sub cx, 3
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz elw2
+    jnz .elw2
     pop dx
     
     push dx
-    add dx, 14
-    mov bx, 7
-erw2:
+    add dx, 17
+    mov bx, 8
+.erw2:
     push dx
     mov ax, dx
     mov cx, 320
     mul cx
     mov cx, si
-    add cx, 16
+    add cx, 20
     add ax, cx
     mov di, ax
     mov byte [es:di], 0
     mov byte [es:di+1], 0
+    mov byte [es:di+2], 0
     pop dx
     inc dx
     dec bx
-    jnz erw2
+    jnz .erw2
     pop dx
     
     pop es
@@ -708,7 +1358,7 @@ erw2:
     pop ax
     ret
 
-; ============ SPAWN ENEMY CAR ============
+; ============ SPAWN ENEMY CAR (ONLY IN LANES) ============
 spawn_enemy:
     push ax
     push bx
@@ -717,38 +1367,39 @@ spawn_enemy:
     
     mov ax, [spawndelay]
     cmp ax, 0
-    je can_spawn
+    je .can_spawn
     dec word [spawndelay]
-    jmp skipspawn
+    jmp .skipspawn
     
-can_spawn:
+.can_spawn:
     call get_random
     and al, 0x1F
     cmp al, 5
-    jg skipspawn
+    jg .skipspawn
     
     mov al, [numcars]
     cmp al, 3
-    jge skipspawn
+    jge .skipspawn
     
     mov si, enemycars
     mov cx, 5
     
-findempty:
+.findempty:
     cmp byte [si+3], 0
-    je foundempty
+    je .foundempty
     add si, 4
-    loop findempty
-    jmp skipspawn
+    loop .findempty
+    jmp .skipspawn
     
-foundempty:
+.foundempty:
+    ; Generate random lane (0, 1, or 2)
     call get_random
     xor ah, ah
     mov bl, 3
     div bl
-    mov [si], ah
+    mov [si], ah  ; Store lane number (0, 1, or 2)
     
-    mov word [si+1], -30
+    mov word [si+1], -50
     mov byte [si+3], 1
     
     inc byte [numcars]
@@ -756,7 +1407,7 @@ foundempty:
     mov ax, [enemy_spawn_delay]
     mov [spawndelay], ax
     
-skipspawn:
+.skipspawn:
     pop cx
     pop si
     pop bx
@@ -767,25 +1418,64 @@ skipspawn:
 spawn_bonus:
     push ax
     push bx
+    push cx
+    push dx
+    push si
     
     cmp byte [bonusactive], 1
-    je skipbonus
+    je .skipbonus
     
     call get_random
     and ax, 0x0FF
     mov bx, [bonus_spawn_chance]
     cmp ax, bx
-    jg skipbonus
+    jg .skipbonus
     
+    ; Check occupied lanes
+    mov si, enemycars
+    mov cx, 5
+    mov bx, 0
+    
+.check_occupied_lanes:
+    cmp byte [si+3], 0
+    je .lane_not_occupied
+    mov al, [si]
+    mov ah, 1
+    mov cl, al
+    shl ah, cl
+    or bl, ah
+.lane_not_occupied:
+    add si, 4
+    loop .check_occupied_lanes
+    
+    ; Find empty lane
+    mov cx, 3
+.find_empty_lane:
     call get_random
     xor ah, ah
-    mov bl, 3
-    div bl
+    mov dl, 3
+    div dl
     mov [bonuslane], ah
+    
+    mov al, 1
+    mov dl, ah
+    mov cl, dl
+    shl al, cl
+    test bl, al
+    jz .lane_is_free
+    
+    loop .find_empty_lane
+    
+    jmp .skipbonus
+    
+.lane_is_free:
     mov word [bonusy], -20
     mov byte [bonusactive], 1
     
-skipbonus:
+.skipbonus:
+    pop si
+    pop dx
+    pop cx
     pop bx
     pop ax
     ret
@@ -802,64 +1492,63 @@ draw_enemies:
     mov si, enemycars
     mov cx, 5
     
-drawnext:
+.drawnext:
     cmp byte [si+3], 0
-    je skipthis
+    je .skipthis
     
+    ; Get lane position
     movzx bx, byte [si]
     shl bx, 1
     mov ax, [lanepositions+bx]
-    sub ax, 8
-    
+
     mov dx, [si+1]
     
     cmp dx, -20
-    jl skipthis
+    jl .skipthis
     cmp dx, 200
-    jge skipthis
+    jge .skipthis
     
-    ; Check if overlapping with bonus - skip drawing if so
+    ; Check bonus overlap
     cmp byte [bonusactive], 0
-    je no_bonus_overlap
+    je .no_bonus_overlap
     
     mov bp, [bonusy]
     sub bp, 25
     cmp dx, bp
-    jl no_bonus_overlap
+    jl .no_bonus_overlap
     
     mov bp, [bonusy]
     add bp, 25
     cmp dx, bp
-    jg no_bonus_overlap
+    jg .no_bonus_overlap
     
-    ; Check if same lane as bonus
     mov al, [si]
     cmp al, [bonuslane]
-    je skipthis  ; Skip drawing this enemy if overlapping with bonus
+    je .skipthis
     
-no_bonus_overlap:
+.no_bonus_overlap:
     push si
     push cx
     
-    ; Determine color: alternate blue and yellow
+    ; Alternate colors
     mov cx, si
     sub cx, enemycars
     shr cx, 2
     and cx, 1
-    jz use_blue
-    mov bl, 14  ; Yellow
-    jmp draw_it
-use_blue:
-    mov bl, 1  ; Blue
-draw_it:
+    jz .use_blue
+    mov bl, 14
+    jmp .draw_it
+.use_blue:
+    mov bl, 1
+.draw_it:
     call draw_enemy_car
     
     pop cx
     pop si
     
-skipthis:
+.skipthis:
     add si, 4
-    loop drawnext
+    loop .drawnext
     
     pop bp
     pop si
@@ -879,7 +1568,7 @@ draw_bonus:
     push es
     
     cmp byte [bonusactive], 0
-    je skipbonus2
+    je .skipbonus2
     
     mov ax, 0xA000
     mov es, ax
@@ -892,14 +1581,14 @@ draw_bonus:
     mov dx, [bonusy]
     
     cmp dx, -20
-    jl skipbonus2
+    jl .skipbonus2
     cmp dx, 200
-    jge skipbonus2
+    jge .skipbonus2
     
-    ; Draw bonus as a yellow square
+    ; Draw bonus as yellow diamond
     push dx
     mov bx, 8
-bonus_row:
+.bonus_row:
     push cx
     push dx
     mov ax, dx
@@ -914,19 +1603,19 @@ bonus_row:
     
     push bx
     mov bx, 8
-bonus_pix:
+.bonus_pix:
     mov byte [es:di], 14
     inc di
     dec bx
-    jnz bonus_pix
+    jnz .bonus_pix
     pop bx
     
     inc dx
     dec bx
-    jnz bonus_row
+    jnz .bonus_row
     pop dx
     
-skipbonus2:
+.skipbonus2:
     pop es
     pop di
     pop dx
@@ -944,23 +1633,23 @@ update_enemies:
     mov si, enemycars
     mov cx, 5
     
-updatenext:
+.updatenext:
     cmp byte [si+3], 0
-    je skipupdate
+    je .skipupdate
     
     mov ax, [enemy_speed]
     add [si+1], ax
     
     mov ax, [si+1]
     cmp ax, 220
-    jl skipupdate
+    jl .skipupdate
     
     mov byte [si+3], 0
     dec byte [numcars]
     
-skipupdate:
+.skipupdate:
     add si, 4
-    loop updatenext
+    loop .updatenext
     
     pop ax
     pop cx
@@ -972,18 +1661,18 @@ update_bonus:
     push ax
     
     cmp byte [bonusactive], 0
-    je skipupdate_bonus
+    je .skipupdate_bonus
     
     mov ax, [bonus_speed]
     add [bonusy], ax
     
     mov ax, [bonusy]
     cmp ax, 220
-    jl skipupdate_bonus
+    jl .skipupdate_bonus
     
     mov byte [bonusactive], 0
     
-skipupdate_bonus:
+.skipupdate_bonus:
     pop ax
     ret
 
@@ -993,58 +1682,61 @@ check_collision:
     push ax
     push bx
     push cx
+    push dx
     
-    mov si, enemycars
-    mov cx, 5
-    
-checknext:
-    cmp byte [si+3], 0
-    je skipcheck
-    
-    mov ax, [si+1]
-    add ax, 10
-    
-    cmp ax, 165
-    jl skipcheck
-    cmp ax, 190
-    jg skipcheck
-    
-    mov al, [carlane]
-    cmp al, [si]
-    jne skipcheck
-    
-    mov byte [gameover], 1
-    
-skipcheck:
-    add si, 4
-    loop checknext
-    
+    ; Check bonus
     cmp byte [bonusactive], 0
-    je skipbonus_check
+    je .check_enemies
     
     mov ax, [bonusy]
-    add ax, 4
+    add ax, 8
     
-    cmp ax, 165
-    jl skipbonus_check
-    cmp ax, 190
-    jg skipbonus_check
+    cmp ax, 175
+    jl .check_enemies
+    cmp ax, 200
+    jg .check_enemies
     
     mov al, [carlane]
     cmp al, [bonuslane]
-    jne skipbonus_check
+    jne .check_enemies
     
-    add word [score], 10
+    add word [score], 50
     mov byte [bonusactive], 0
     
-skipbonus_check:
+.check_enemies:
+    mov si, enemycars
+    mov cx, 5
+    
+.checknext:
+    cmp byte [si+3], 0
+    je .skipcheck
+    
+    mov ax, [si+1]
+    add ax, 12
+    
+    cmp ax, 175
+    jl .skipcheck
+    cmp ax, 200
+    jg .skipcheck
+    
+    mov al, [carlane]
+    cmp al, [si]
+    jne .skipcheck
+    
+    mov byte [gameover], 1
+    
+.skipcheck:
+    add si, 4
+    loop .checknext
+    
+    pop dx
     pop cx
     pop bx
     pop ax
     pop si
     ret
 
-; ============ IMPROVED SHOW SCORE (from second code) ============
+; ============ SHOW SCORE IN BLACK BOX ============
 show_score:
     push ax
     push bx
@@ -1057,72 +1749,67 @@ show_score:
     mov ax, 0xA000
     mov es, ax
     
-    ; Clear score area with black
-    mov dx, 5
-    mov cx, 15
-clear_score_y:
+    ; Draw black score box at top
+    mov dx, 2
+    mov cx, 8
+.clear_score_y:
     push dx
     mov ax, dx
     mov bx, 320
     mul bx
-    add ax, 250
+    add ax, 230
     mov di, ax
     pop dx
     
     push cx
-    mov cx, 60
+    mov cx, 80
     mov al, 0
-clear_score_x:
+.clear_score_x:
     mov [es:di], al
     inc di
-    loop clear_score_x
+    loop .clear_score_x
     pop cx
     
     inc dx
-    loop clear_score_y
+    loop .clear_score_y
     
-    ; Display score number (right aligned)
+    ; Draw "SCORE:" text in white
+    mov di, 232
+    call draw_small_text
+    
+    ; Display score number
     mov ax, [score]
     mov bx, 10
     mov cx, 0
     
-    ; Extract digits
-get_digits:
+.get_digits:
     xor dx, dx
     div bx
     push dx
     inc cx
     cmp ax, 0
-    jne get_digits
+    jne .get_digits
     
-    ; Make sure we have at least 1 digit
     cmp cx, 0
-    jne has_digits
+    jne .has_digits
     push 0
     inc cx
     
-has_digits:
-    ; Position for rightmost digit
-    mov di, 300
-    sub di, cx
-    sub di, cx
-    sub di, cx
-    sub di, cx
-    sub di, cx  ; 5 pixels per digit
+.has_digits:
+    mov di, 275
     
-draw_score_digits:
+.draw_score_digits:
     pop dx
     push cx
     push di
     
-    ; Draw digit
     mov ax, dx
-    call draw_digit
+    call draw_digit_small
     
     pop di
-    add di, 6
+    add di, 7
     pop cx
-    loop draw_score_digits
+    loop .draw_score_digits
     
     pop es
     pop si
@@ -1133,28 +1820,65 @@ draw_score_digits:
     pop ax
     ret
 
-; Draw a single digit (0-9) using actual digit patterns
-draw_digit:
+; Draw "SCORE:" text
+draw_small_text:
     push ax
     push bx
     push cx
     push dx
     push di
-    push es
     
-    mov bx, ax  ; Save digit value
-    mov dx, 10  ; Y position
+    mov dx, 4
+    mov bx, 5
+.text_loop:
+    push bx
+    push dx
+    mov ax, dx
+    mov bx, 320
+    mul bx
+    add ax, di
+    mov di, ax
     
-    ; Calculate digit pattern offset
+    mov cx, 35
+    mov al, 15
+.text_pixel:
+    mov [es:di], al
+    inc di
+    loop .text_pixel
+    
+    pop dx
+    inc dx
+    pop bx
+    dec bx
+    jnz .text_loop
+    
+    pop di
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; Draw small digit for score
+draw_digit_small:
+    push ax
+    push bx
+    push cx
+    push dx
+    push di
+    push si
+    
+    mov bx, ax
+    mov dx, 3
+    
     mov ax, bx
-    mov cx, 25  ; 5 rows * 5 pixels per row
+    mov cx, 15
     mul cx
     mov si, ax
-    add si, digit_patterns
+    add si, digit_patterns_small
     
-    ; Draw 5x5 digit
-    mov cx, 5   ; 5 rows
-draw_digit_row:
+    mov cx, 5
+.draw_row:
     push cx
     push di
     push dx
@@ -1167,23 +1891,23 @@ draw_digit_row:
     add ax, di
     mov di, ax
     
-    mov cx, 5   ; 5 columns
-draw_digit_col:
+    mov cx, 3
+.draw_col:
     lodsb
     cmp al, 0
-    je skip_pixel
-    mov byte [es:di], 15  ; White
-skip_pixel:
+    je .skip_pixel
+    mov byte [es:di], 15
+.skip_pixel:
     inc di
-    loop draw_digit_col
+    loop .draw_col
     
     pop dx
     inc dx
     pop di
     pop cx
-    loop draw_digit_row
+    loop .draw_row
     
-    pop es
+    pop si
     pop di
     pop dx
     pop cx
@@ -1191,217 +1915,65 @@ skip_pixel:
     pop ax
     ret
 
-; Digit patterns (5x5 for each digit 0-9)
-digit_patterns:
+; Small digit patterns (3x5)
+digit_patterns_small:
     ; 0
-    db 1,1,1,1,1
-    db 1,0,0,0,1
-    db 1,0,0,0,1
-    db 1,0,0,0,1
-    db 1,1,1,1,1
+    db 1,1,1
+    db 1,0,1
+    db 1,0,1
+    db 1,0,1
+    db 1,1,1
     ; 1
-    db 0,0,1,0,0
-    db 0,1,1,0,0
-    db 0,0,1,0,0
-    db 0,0,1,0,0
-    db 0,1,1,1,0
+    db 0,1,0
+    db 1,1,0
+    db 0,1,0
+    db 0,1,0
+    db 1,1,1
     ; 2
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 1,1,1,1,1
-    db 1,0,0,0,0
-    db 1,1,1,1,1
+    db 1,1,1
+    db 0,0,1
+    db 1,1,1
+    db 1,0,0
+    db 1,1,1
     ; 3
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 1,1,1,1,1
+    db 1,1,1
+    db 0,0,1
+    db 1,1,1
+    db 0,0,1
+    db 1,1,1
     ; 4
-    db 1,0,0,0,1
-    db 1,0,0,0,1
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 0,0,0,0,1
+    db 1,0,1
+    db 1,0,1
+    db 1,1,1
+    db 0,0,1
+    db 0,0,1
     ; 5
-    db 1,1,1,1,1
-    db 1,0,0,0,0
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 1,1,1,1,1
+    db 1,1,1
+    db 1,0,0
+    db 1,1,1
+    db 0,0,1
+    db 1,1,1
     ; 6
-    db 1,1,1,1,1
-    db 1,0,0,0,0
-    db 1,1,1,1,1
-    db 1,0,0,0,1
-    db 1,1,1,1,1
+    db 1,1,1
+    db 1,0,0
+    db 1,1,1
+    db 1,0,1
+    db 1,1,1
     ; 7
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 0,0,0,1,0
-    db 0,0,1,0,0
-    db 0,1,0,0,0
+    db 1,1,1
+    db 0,0,1
+    db 0,1,0
+    db 0,1,0
+    db 0,1,0
     ; 8
-    db 1,1,1,1,1
-    db 1,0,0,0,1
-    db 1,1,1,1,1
-    db 1,0,0,0,1
-    db 1,1,1,1,1
+    db 1,1,1
+    db 1,0,1
+    db 1,1,1
+    db 1,0,1
+    db 1,1,1
     ; 9
-    db 1,1,1,1,1
-    db 1,0,0,0,1
-    db 1,1,1,1,1
-    db 0,0,0,0,1
-    db 1,1,1,1,1
-
-; ============ KEYBOARD ISR ============
-kbisr:
-    push ax
-    push bx
-    push ds
-    
-    push cs
-    pop ds
-    
-    in al, 0x60
-    
-    cmp al, 0x4B
-    je leftpressed
-    
-    cmp al, 0x4D
-    je rightpressed
-    
-    jmp kbdone
-    
-leftpressed:
-    cmp byte [carlane], 0
-    je kbdone
-    dec byte [carlane]
-    movzx bx, byte [carlane]
-    shl bx, 1
-    mov ax, [lanepositions+bx]
-    mov [carx], ax
-    jmp kbdone
-    
-rightpressed:
-    cmp byte [carlane], 2
-    je kbdone
-    inc byte [carlane]
-    movzx bx, byte [carlane]
-    shl bx, 1
-    mov ax, [lanepositions+bx]
-    mov [carx], ax
-    
-kbdone:
-    mov al, 0x20
-    out 0x20, al
-    
-    pop ds
-    pop bx
-    pop ax
-    iret
-
-; ============ TIMER ISR ============
-timer:
-    push ax
-    push ds
-    
-    push cs
-    pop ds
-    
-    inc word [tickcount]
-    cmp word [tickcount], 2
-    jl timerdone
-    
-    mov word [tickcount], 0
-    
-    cmp byte [gameover], 1
-    je timerdone
-    
-    inc word [scrolloffset]
-    
-    call redraw_screen
-    call draw_lanes
-    call draw_trees
-    call spawn_enemy
-    call spawn_bonus
-    call update_enemies
-    call update_bonus
-    call draw_enemies
-    call draw_bonus
-    call DrawCar
-    call check_collision
-    call show_score
-    
-    inc word [score]
-    
-timerdone:
-    mov al, 0x20
-    out 0x20, al
-    
-    pop ds
-    pop ax
-    iret
-
-; ============ MAIN PROGRAM ============
-start:
-    xor ax, ax
-    int 0x1A
-    mov [rand_seed], dx
-    
-    xor ax, ax
-    mov es, ax
-    
-    mov ax, [es:9*4]
-    mov [oldkb], ax
-    mov ax, [es:9*4+2]
-    mov [oldkb+2], ax
-    
-    cli
-    mov ax, kbisr
-    mov [es:9*4], ax
-    mov [es:9*4+2], cs
-    sti
-    
-    mov ax, [es:8*4]
-    mov [oldtimer], ax
-    mov ax, [es:8*4+2]
-    mov [oldtimer+2], ax
-    
-    cli
-    mov ax, timer
-    mov [es:8*4], ax
-    mov [es:8*4+2], cs
-    sti
-    
-    mov ax, 0x0013
-    int 0x10
-    
-gameloop:
-    cmp byte [gameover], 1
-    je endgame
-    
-    hlt
-    jmp gameloop
-    
-endgame:
-    xor ax, ax
-    mov es, ax
-    
-    cli
-    mov ax, [oldkb]
-    mov [es:9*4], ax
-    mov ax, [oldkb+2]
-    mov [es:9*4+2], ax
-    
-    mov ax, [oldtimer]
-    mov [es:8*4], ax
-    mov ax, [oldtimer+2]
-    mov [es:8*4+2], ax
-    sti
-    
-    mov ax, 0x0003
-    int 0x10
-    
-    mov ax, 0x4c00
-    int 0x21
+    db 1,1,1
+    db 1,0,1
+    db 1,1,1
+    db 0,0,1
+    db 1,1,1
